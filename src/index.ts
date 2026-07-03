@@ -2,24 +2,18 @@ import * as core from '@actions/core';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { BrowserSession } from './core/browser';
+import { purchasePension720 } from './core/pension720';
 import { getDepositBalance, purchaseAuto, purchaseManual } from './core/purchase';
 import { isInsufficientBalanceError } from './core/errors';
+import type { Pension720PurchaseResult, PurchaseMetadata } from './core/types';
 import { generateExcluding } from './utils/numbers';
 import { initLabels, createConsolidatedIssue, createPurchaseFailureIssue, checkWinningIssues } from './github/issues';
 import { notifyPurchase, notifyPurchaseFailure, notifyWinning } from './telegram/notify';
 
-interface PurchaseMetadata {
-  type: 'auto' | 'manual';
-  numbers: number[][];
-  timestamp: string;
-  remainingBalance?: number;
-  balanceCheckedAt?: string;
-  balanceCheckError?: string;
-}
-
 interface WorkflowApi {
   purchaseAuto: (amount: number) => Promise<number[][]>;
   purchaseManual: (numbers: number[][]) => Promise<number[][]>;
+  purchasePension720: (amount?: number) => Promise<Pension720PurchaseResult>;
   generateExcluding: (exclude: number[][], count: number) => number[][];
 }
 
@@ -111,11 +105,12 @@ async function run() {
     }
 
     // Create API with session bound to functions (no need to pass session manually)
-    const api = {
+    const api: WorkflowApi = {
       purchaseAuto: async (amt: number) => {
         console.log(`[Main] Executing auto purchase: ${amt} games`);
         const result = await purchaseAuto(session, amt);
         purchases.push({
+          product: 'lotto645',
           type: 'auto',
           numbers: result,
           timestamp: new Date().toISOString()
@@ -127,11 +122,22 @@ async function run() {
         console.log(`[Main] Executing manual purchase: ${numbers.length} games`);
         const result = await purchaseManual(session, numbers);
         purchases.push({
+          product: 'lotto645',
           type: 'manual',
           numbers: result,
           timestamp: new Date().toISOString()
         }); // Auto-track successful purchase
         console.log(`[Main] Manual purchase successful: ${result.length} games`);
+        return result;
+      },
+      purchasePension720: async (amt?: number) => {
+        console.log(`[Main] Executing pension720 purchase: ${amt ?? 5000} KRW`);
+        const result = await purchasePension720(session, amt);
+        purchases.push({
+          ...result,
+          timestamp: new Date().toISOString()
+        });
+        console.log(`[Main] Pension720 purchase successful: ${result.ticketCount} tickets`);
         return result;
       },
       generateExcluding: (exclude: number[][], count: number) => {
@@ -147,9 +153,10 @@ async function run() {
       await workflow(api);
       console.log('[Main] Custom workflow completed');
     } else {
-      // Default: simple auto purchase
+      // Default: lotto auto purchase plus pension720 all-groups auto purchase.
       console.log(`[Main] Running default auto purchase: ${amount} games`);
       await api.purchaseAuto(amount);
+      await api.purchasePension720();
     }
 
     console.log(`[Main] All purchases completed: ${purchases.length} total purchases`);
@@ -182,8 +189,17 @@ async function run() {
       try {
         await attachRemainingBalance(session, purchases);
         await createConsolidatedIssue(purchases);
-        const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
-        console.log(`[Main] Created consolidated issue for ${purchases.length} purchases (${totalGames} total games)`);
+        const totalLottoGames = purchases.reduce(
+          (sum, p) => sum + (p.product === 'lotto645' ? p.numbers.length : 0),
+          0
+        );
+        const totalPensionTickets = purchases.reduce(
+          (sum, p) => sum + (p.product === 'pension720' ? p.ticketCount : 0),
+          0
+        );
+        console.log(
+          `[Main] Processed ${purchases.length} purchases (${totalLottoGames} lotto games, ${totalPensionTickets} pension720 tickets)`
+        );
 
         // Send Telegram notification for purchases
         await notifyPurchase(purchases);

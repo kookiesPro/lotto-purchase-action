@@ -30830,6 +30830,8 @@ const URLS = {
     LOGOUT: 'https://www.dhlottery.co.kr/logout.do',
     MYPAGE_HOME: 'https://www.dhlottery.co.kr/mypage/home',
     LOTTO_645: 'https://ol.dhlottery.co.kr/olotto/game/game645.do',
+    PENSION_720_MOBILE: 'https://el.dhlottery.co.kr/game_mobile/pension720/game.jsp',
+    PENSION_720_LEDGER: 'https://www.dhlottery.co.kr/mypage/mylotteryledger?lottoId=LP72',
     CHECK_WINNING: 'https://www.dhlottery.co.kr/qr.do'
 };
 // DOM selectors for Playwright automation
@@ -31267,7 +31269,7 @@ function getDepositBalance(session) {
         return balance;
     });
 }
-function validateDepositBalance(session, requestedGames) {
+function validateDepositBalance$1(session, requestedGames) {
     return __awaiter$3(this, void 0, void 0, function* () {
         const requiredAmount = requestedGames * LOTTO_GAME_PRICE;
         const currentBalance = yield getDepositBalance(session);
@@ -31324,7 +31326,7 @@ function purchaseAuto(session, amount) {
         amount = Math.max(1, Math.min(5, amount));
         // Validate purchase time
         validatePurchaseAvailability();
-        yield validateDepositBalance(session, amount);
+        yield validateDepositBalance$1(session, amount);
         const page = yield openPurchasePage(session, 'auto');
         // Click auto purchase button
         console.log('[Purchase] Clicking auto purchase button');
@@ -31376,7 +31378,7 @@ function purchaseManual(session, numbers) {
         });
         // Validate purchase time
         validatePurchaseAvailability();
-        yield validateDepositBalance(session, numbers.length);
+        yield validateDepositBalance$1(session, numbers.length);
         const page = yield openPurchasePage(session, 'manual');
         // Select numbers for each game
         for (let gameIdx = 0; gameIdx < numbers.length; gameIdx++) {
@@ -31415,6 +31417,323 @@ function purchaseManual(session, numbers) {
         }
         console.log('[Purchase] Manual purchase completed:', result);
         return result;
+    });
+}
+
+/* global globalThis */
+dayjs.extend(utc);
+dayjs.extend(timezone);
+const PENSION_720_TICKET_PRICE = 1000;
+const PENSION_720_TICKET_COUNT = 5;
+const PENSION_720_PURCHASE_AMOUNT = PENSION_720_TICKET_PRICE * PENSION_720_TICKET_COUNT;
+const PENSION_720_AUTO_TIMEOUT = 20000;
+const PENSION_720_ORDER_TIMEOUT = Math.max(PURCHASE_RESULT_TIMEOUT, 30000);
+function validatePension720Amount(amount) {
+    const requestedAmount = amount !== null && amount !== void 0 ? amount : PENSION_720_PURCHASE_AMOUNT;
+    if (requestedAmount !== PENSION_720_PURCHASE_AMOUNT) {
+        throw new Error(`현재 연금복권720+ 자동 구매는 모든조 5매(${formatWon(PENSION_720_PURCHASE_AMOUNT)})만 지원합니다`);
+    }
+    return requestedAmount;
+}
+function validatePension720Availability() {
+    const now = dayjs.tz(Date.now(), 'Asia/Seoul');
+    // Official internet sales time: Fri-Wed all day, Thu 00:00-17:00 and 22:00-24:00.
+    if (now.day() !== 4) {
+        return;
+    }
+    const today = now.hour(0).minute(0).second(0).millisecond(0);
+    const pauseStart = today.hour(17);
+    const pauseEnd = today.hour(22);
+    if (!now.isBefore(pauseStart) && now.isBefore(pauseEnd)) {
+        throw new Error('연금복권720+ 구매 가능 시간이 아닙니다 (금~수: 00:00-24:00, 목요일: 00:00-17:00 / 22:00-24:00)');
+    }
+}
+function validateDepositBalance(session, requiredAmount) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        const currentBalance = yield getDepositBalance(session);
+        if (currentBalance < requiredAmount) {
+            throw new InsufficientBalanceError({
+                currentBalance,
+                requiredAmount,
+                requestedGames: PENSION_720_TICKET_COUNT
+            });
+        }
+        console.log(`[Pension720] Deposit balance is enough: required ${formatWon(requiredAmount)}`);
+    });
+}
+function getPension720Diagnostics(page, dialogMessages = []) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        const title = yield page.title().catch(() => 'unknown');
+        const bodySnippet = yield page
+            .locator('body')
+            .innerText()
+            .then(text => text.replace(/\s+/g, ' ').slice(0, 300))
+            .catch(() => '');
+        const dialogs = dialogMessages.length > 0 ? `, dialogs: ${dialogMessages.join(' | ')}` : '';
+        return [`URL: ${page.url()}`, `title: ${title}`, `bodySnippet: ${bodySnippet || 'none'}`].join(', ') + dialogs;
+    });
+}
+function createDialogCollector(page) {
+    const messages = [];
+    const handler = (dialog) => __awaiter$3(this, void 0, void 0, function* () {
+        messages.push(`${dialog.type()}: ${dialog.message()}`);
+        yield dialog.accept().catch(() => undefined);
+    });
+    page.on('dialog', handler);
+    return {
+        messages,
+        dispose: () => page.off('dialog', handler)
+    };
+}
+function waitForPension720PageReady(page) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        const isReady = yield page
+            .waitForFunction(() => {
+            const doc = globalThis.document;
+            const win = globalThis;
+            return (Boolean(doc.querySelector('#frm')) &&
+                Boolean(doc.querySelector('#frmauto')) &&
+                typeof win.doAuto === 'function' &&
+                typeof win.doVerify === 'function' &&
+                typeof win.doOrder === 'function' &&
+                typeof win.checkDeposit === 'function' &&
+                typeof win.encrypt === 'function');
+        }, null, { timeout: PURCHASE_PAGE_READY_TIMEOUT })
+            .then(() => true)
+            .catch(() => false);
+        if (!isReady) {
+            throw new Error(`Failed to load pension720 purchase page (${yield getPension720Diagnostics(page)})`);
+        }
+    });
+}
+function waitForPension720Deposit(page) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        yield page
+            .evaluate(() => {
+            const win = globalThis;
+            if (typeof win.checkDeposit === 'function') {
+                win.checkDeposit();
+            }
+        })
+            .catch(() => undefined);
+        const depositReady = yield page
+            .waitForFunction(() => {
+            var _a;
+            const doc = globalThis.document;
+            const deposit = Number(((_a = doc.querySelector('#curdeposit')) === null || _a === void 0 ? void 0 : _a.value) || '0');
+            return deposit > 0;
+        }, null, { timeout: PURCHASE_PAGE_READY_TIMEOUT })
+            .then(() => true)
+            .catch(() => false);
+        if (!depositReady) {
+            throw new Error(`연금복권720+ 페이지에서 예치금을 조회하지 못했습니다 (${yield getPension720Diagnostics(page)})`);
+        }
+    });
+}
+function openPension720Page(session) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        const page = session.getPage();
+        console.log('[Pension720] Navigating to pension720 mobile purchase page');
+        yield session.navigate(URLS.PENSION_720_MOBILE);
+        yield page.waitForLoadState('domcontentloaded').catch(() => undefined);
+        if (page.url().includes('/login')) {
+            throw new Error('연금복권720+ 구매 페이지 접근 중 로그인 페이지로 이동했습니다');
+        }
+        yield waitForPension720PageReady(page);
+        yield waitForPension720Deposit(page);
+        return page;
+    });
+}
+function readAutoSelectionState(page) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        return page.evaluate(() => {
+            const doc = globalThis.document;
+            const value = (selector) => { var _a; return String(((_a = doc.querySelector(selector)) === null || _a === void 0 ? void 0 : _a.value) || ''); };
+            return {
+                autoProcess: value('#auto_process'),
+                buyCount: value('#frm input[name="BUY_CNT"]'),
+                buyNo: value('#frm input[name="BUY_NO"]'),
+                selectedNumber: value('#selnum'),
+                setType: value('#set_type'),
+                workingFlag: value('#WORKING_FLAG')
+            };
+        });
+    });
+}
+function requestAutoSelection(page) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        yield page.evaluate(() => {
+            const win = globalThis;
+            const $ = win.$;
+            if (typeof win.resetNumber === 'function') {
+                win.resetNumber();
+            }
+            if ($) {
+                $('#group_sel0').prop('checked', true).trigger('click');
+                $('#set_type').val('SA');
+                $('#classnum').val('');
+            }
+            win.doAuto();
+        });
+    });
+}
+function waitForAutoSelection(page) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        yield page.waitForFunction(() => {
+            const doc = globalThis.document;
+            const value = (selector) => { var _a; return String(((_a = doc.querySelector(selector)) === null || _a === void 0 ? void 0 : _a.value) || ''); };
+            const selectedNumber = value('#selnum');
+            return value('#WORKING_FLAG') !== 'true' && value('#auto_process') === 'Y' && /^\d{6}$/.test(selectedNumber);
+        }, null, { timeout: PENSION_720_AUTO_TIMEOUT });
+        return readAutoSelectionState(page);
+    });
+}
+function verifyAutoSelection(page) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        yield page.evaluate(() => {
+            globalThis.doVerify();
+        });
+        yield page.waitForFunction(() => {
+            const doc = globalThis.document;
+            const value = (selector) => { var _a; return String(((_a = doc.querySelector(selector)) === null || _a === void 0 ? void 0 : _a.value) || ''); };
+            const buyNo = value('#frm input[name="BUY_NO"]').split(',').filter(Boolean);
+            const buySetTypes = value('#frm input[name="BUY_SET_TYPE"]').split(',').filter(Boolean);
+            return (Number(value('#frm input[name="BUY_CNT"]')) === 5 &&
+                buyNo.length === 5 &&
+                buySetTypes.length === 5 &&
+                buySetTypes.every((setType) => setType === 'SA'));
+        }, null, { timeout: PURCHASE_PAGE_READY_TIMEOUT });
+    });
+}
+function addPension720AutoTickets(page, dialogMessages) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        let lastState = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            console.log(`[Pension720] Requesting all-groups auto number (${attempt}/3)`);
+            try {
+                yield requestAutoSelection(page);
+                const state = yield waitForAutoSelection(page);
+                lastState = state;
+                if (state.setType !== 'SA') {
+                    console.warn(`[Pension720] Auto selection did not return all-groups ticket, retrying (${state.setType})`);
+                    continue;
+                }
+                console.log(`[Pension720] Auto number selected for all groups: ${state.selectedNumber}`);
+                yield verifyAutoSelection(page);
+                return;
+            }
+            catch (error) {
+                lastState = yield readAutoSelectionState(page).catch(() => lastState);
+                const message = error instanceof Error ? error.message : String(error);
+                console.warn(`[Pension720] Failed to prepare auto tickets on attempt ${attempt}: ${message}`);
+            }
+        }
+        throw new Error(`Failed to prepare pension720 all-groups auto tickets (state: ${JSON.stringify(lastState)}, ${yield getPension720Diagnostics(page, dialogMessages)})`);
+    });
+}
+function submitPension720Order(page, dialogMessages) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        console.log('[Pension720] Clicking pension720 purchase button');
+        yield page.evaluate(() => {
+            globalThis.doOrder();
+        });
+        const completed = yield page
+            .waitForFunction(() => {
+            var _a;
+            const doc = globalThis.document;
+            const win = globalThis;
+            const complete = doc.querySelector('.buyComplete');
+            const message = String(((_a = doc.querySelector('.saleRetMsg')) === null || _a === void 0 ? void 0 : _a.textContent) || '').trim();
+            return Boolean(complete && win.getComputedStyle(complete).display !== 'none' && message);
+        }, null, { timeout: PENSION_720_ORDER_TIMEOUT })
+            .then(() => true)
+            .catch(() => false);
+        if (!completed) {
+            throw new Error(`Failed to load pension720 purchase results (${yield getPension720Diagnostics(page, dialogMessages)})`);
+        }
+    });
+}
+function parsePension720Result(page) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        return page.evaluate(() => {
+            const doc = globalThis.document;
+            const text = (selector) => {
+                var _a;
+                return String(((_a = doc.querySelector(selector)) === null || _a === void 0 ? void 0 : _a.textContent) || '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            };
+            const numberFromText = (value) => Number(value.replace(/[^\d]/g, '')) || 0;
+            const parseTickets = (selector) => Array.from(doc.querySelectorAll(selector))
+                .map((element) => {
+                var _a;
+                const raw = String(element.textContent || '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                const groupText = String(((_a = element.querySelector('.lotto720_popup_group')) === null || _a === void 0 ? void 0 : _a.textContent) || '')
+                    .replace(/\s+/g, '')
+                    .trim();
+                const group = groupText.replace(/조$/, '');
+                const number = raw.replace(groupText, '').replace(/\s+/g, '').trim();
+                return { group, number, raw };
+            })
+                .filter((ticket) => /^\d+$/.test(ticket.group) && /^\d{6}$/.test(ticket.number));
+            return {
+                amount: numberFromText(text('.orderPay')),
+                failedTicketCount: numberFromText(text('.failCnt')),
+                failedTickets: parseTickets('.failTicket .lotto720_popup_content_middle_num'),
+                message: text('.saleRetMsg'),
+                orderDate: text('.orderDate'),
+                orderNo: text('.orderNo'),
+                round: text('.buyRound'),
+                saleCount: numberFromText(text('.saleCnt')),
+                tickets: parseTickets('.saleTicket .lotto720_popup_content_middle_num')
+            };
+        });
+    });
+}
+// Pension Lottery 720+ all-groups auto purchase: 5 tickets, 5,000 KRW.
+function purchasePension720(session, amount) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        if (!session.isAuthenticated()) {
+            throw new Error('Not authenticated. Login first');
+        }
+        const requestedAmount = validatePension720Amount(amount);
+        validatePension720Availability();
+        yield validateDepositBalance(session, requestedAmount);
+        const page = yield openPension720Page(session);
+        const dialogs = createDialogCollector(page);
+        try {
+            yield addPension720AutoTickets(page, dialogs.messages);
+            yield submitPension720Order(page, dialogs.messages);
+            const parsed = yield parsePension720Result(page);
+            const ticketCount = parsed.saleCount || parsed.tickets.length;
+            const actualAmount = parsed.amount || ticketCount * PENSION_720_TICKET_PRICE;
+            if (parsed.tickets.length === 0) {
+                throw new Error(`연금복권720+ 구매 결과에 성공 티켓이 없습니다 (${parsed.message || 'no message'}, ${yield getPension720Diagnostics(page, dialogs.messages)})`);
+            }
+            if (ticketCount !== PENSION_720_TICKET_COUNT) {
+                console.warn(`[Pension720] Purchase completed partially: ${ticketCount}/${PENSION_720_TICKET_COUNT} tickets`);
+            }
+            const result = {
+                product: 'pension720',
+                type: 'auto',
+                round: parsed.round || undefined,
+                orderNo: parsed.orderNo || undefined,
+                orderDate: parsed.orderDate || undefined,
+                amount: actualAmount,
+                ticketCount,
+                tickets: parsed.tickets,
+                failedTicketCount: parsed.failedTicketCount || undefined,
+                failedTickets: parsed.failedTickets.length > 0 ? parsed.failedTickets : undefined,
+                message: parsed.message || undefined
+            };
+            console.log('[Pension720] Purchase completed:', result);
+            return result;
+        }
+        finally {
+            dialogs.dispose();
+        }
     });
 }
 
@@ -57264,15 +57583,20 @@ function initLabels() {
 // Create a consolidated GitHub Issue for multiple purchases
 function createConsolidatedIssue(purchases) {
     return __awaiter$3(this, void 0, void 0, function* () {
+        const lottoPurchases = purchases.filter((purchase) => purchase.product === 'lotto645');
+        if (lottoPurchases.length === 0) {
+            console.log('[Issues] No lotto645 purchases to create a winning-check issue');
+            return;
+        }
         const octokit = getOctokit();
         const repo = getRepo();
         const workflowRun = new Date().toISOString();
         const round = getNextLottoRound();
         // Calculate total games
-        const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
-        const body = buildConsolidatedIssueBody(purchases, round, workflowRun);
+        const totalGames = lottoPurchases.reduce((sum, p) => sum + p.numbers.length, 0);
+        const body = buildConsolidatedIssueBody(lottoPurchases, round, workflowRun);
         yield octokit.rest.issues.create(Object.assign(Object.assign({}, repo), { title: `제${round}회 ${totalGames}게임`, body, labels: [LABELS.waiting] }));
-        console.log(`Created consolidated issue for ${purchases.length} purchases (${totalGames} total games) for round ${round}`);
+        console.log(`Created consolidated issue for ${lottoPurchases.length} lotto purchases (${totalGames} total games) for round ${round}`);
     });
 }
 // Create a GitHub Issue for a purchase failure that needs user action
@@ -57283,7 +57607,7 @@ function createPurchaseFailureIssue(details, message) {
         const workflowRun = getContext().runId
             ? `https://github.com/${repo.owner}/${repo.repo}/actions/runs/${getContext().runId}`
             : '';
-        yield octokit.rest.issues.create(Object.assign(Object.assign({}, repo), { title: `로또 구매 실패 - 예치금 부족 (${new Date().toISOString().slice(0, 10)})`, body: buildPurchaseFailureIssueBody(details, message, workflowRun), labels: [LABELS.purchase_failure] }));
+        yield octokit.rest.issues.create(Object.assign(Object.assign({}, repo), { title: `복권 구매 실패 - 예치금 부족 (${new Date().toISOString().slice(0, 10)})`, body: buildPurchaseFailureIssueBody(details, message, workflowRun), labels: [LABELS.purchase_failure] }));
         console.log('[Issues] Created purchase failure issue for insufficient balance');
     });
 }
@@ -57540,16 +57864,46 @@ function notifyPurchase(purchases) {
         if (!isEnabled())
             return;
         const round = getNextLottoRound();
-        const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
+        const lottoPurchases = purchases.filter((purchase) => purchase.product === 'lotto645');
+        const pensionPurchases = purchases.filter((purchase) => purchase.product === 'pension720');
+        const totalLottoGames = lottoPurchases.reduce((sum, p) => sum + p.numbers.length, 0);
+        const totalPensionTickets = pensionPurchases.reduce((sum, p) => sum + p.ticketCount, 0);
+        const totalPensionAmount = pensionPurchases.reduce((sum, p) => sum + p.amount, 0);
         const balanceFeedback = getBalanceFeedback(purchases);
-        const sections = purchases.map((purchase, index) => {
+        const lottoSections = lottoPurchases.map((purchase, index) => {
             const typeLabel = purchase.type === 'auto' ? '자동' : '수동';
             const link = getCheckWinningLink(purchase.numbers, round);
             const numbersText = purchase.numbers.map((nums, i) => `  ${i + 1}. \`${nums.join(', ')}\``).join('\n');
-            return `*#${index + 1} (${typeLabel})*\n${numbersText}\n[당첨확인](${link})`;
+            return `*로또 #${index + 1} (${typeLabel})*\n${numbersText}\n[당첨확인](${link})`;
         });
-        const summary = [`총 ${totalGames}게임`, balanceFeedback].filter(Boolean).join('\n');
-        const message = `🎰 *제${round}회 로또 구매 완료*\n` + `${summary}\n\n` + sections.join('\n\n');
+        const pensionSections = pensionPurchases.map((purchase, index) => {
+            const roundText = purchase.round ? `회차: ${purchase.round}회\n` : '';
+            const orderText = purchase.orderNo ? `거래번호: \`${purchase.orderNo}\`\n` : '';
+            const ticketsText = purchase.tickets
+                .map((ticket, ticketIndex) => `  ${ticketIndex + 1}. \`${ticket.group}조 ${ticket.number}\``)
+                .join('\n');
+            const failedText = purchase.failedTicketCount && purchase.failedTicketCount > 0 ? `\n실패: ${purchase.failedTicketCount}매` : '';
+            return (`*연금복권720+ #${index + 1} (자동)*\n` +
+                `${roundText}` +
+                `구매금액: ${formatWon(purchase.amount)} / ${purchase.ticketCount}매\n` +
+                `${orderText}` +
+                `${ticketsText}${failedText}\n` +
+                `[구매내역 보기](${URLS.PENSION_720_LEDGER})`);
+        });
+        const summary = [
+            totalLottoGames > 0 ? `로또645: ${totalLottoGames}게임` : null,
+            totalPensionTickets > 0 ? `연금복권720+: ${totalPensionTickets}매 (${formatWon(totalPensionAmount)})` : null,
+            balanceFeedback
+        ]
+            .filter(Boolean)
+            .join('\n');
+        const sections = [...lottoSections, ...pensionSections];
+        const title = totalLottoGames > 0 && totalPensionTickets > 0
+            ? `🎰 *복권 구매 완료*`
+            : totalLottoGames > 0
+                ? `🎰 *제${round}회 로또 구매 완료*`
+                : `🎰 *연금복권720+ 구매 완료*`;
+        const message = `${title}\n${summary}\n\n${sections.join('\n\n')}`;
         console.log('[Telegram] Sending purchase notification');
         yield sendMessage(message);
     });
@@ -57574,7 +57928,11 @@ function notifyPurchaseFailure(details, message) {
     return __awaiter$3(this, void 0, void 0, function* () {
         if (!isEnabled())
             return;
-        const notification = `⚠️ *로또 구매 실패*\n\n` + `${message}\n\n` + `현재 예치금: ${formatWon(details.currentBalance)}`;
+        const notification = `⚠️ *복권 구매 실패*\n\n` +
+            `${message}\n\n` +
+            `현재 예치금: ${formatWon(details.currentBalance)}\n` +
+            `필요 금액: ${formatWon(details.requiredAmount)}\n` +
+            `부족 금액: ${formatWon(details.shortage)}`;
         console.log('[Telegram] Sending purchase failure notification');
         yield sendMessage(notification);
     });
@@ -57659,6 +58017,7 @@ function run() {
                     console.log(`[Main] Executing auto purchase: ${amt} games`);
                     const result = yield purchaseAuto(session, amt);
                     purchases.push({
+                        product: 'lotto645',
                         type: 'auto',
                         numbers: result,
                         timestamp: new Date().toISOString()
@@ -57670,11 +58029,19 @@ function run() {
                     console.log(`[Main] Executing manual purchase: ${numbers.length} games`);
                     const result = yield purchaseManual(session, numbers);
                     purchases.push({
+                        product: 'lotto645',
                         type: 'manual',
                         numbers: result,
                         timestamp: new Date().toISOString()
                     }); // Auto-track successful purchase
                     console.log(`[Main] Manual purchase successful: ${result.length} games`);
+                    return result;
+                }),
+                purchasePension720: (amt) => __awaiter$3(this, void 0, void 0, function* () {
+                    console.log(`[Main] Executing pension720 purchase: ${amt !== null && amt !== void 0 ? amt : 5000} KRW`);
+                    const result = yield purchasePension720(session, amt);
+                    purchases.push(Object.assign(Object.assign({}, result), { timestamp: new Date().toISOString() }));
+                    console.log(`[Main] Pension720 purchase successful: ${result.ticketCount} tickets`);
                     return result;
                 }),
                 generateExcluding: (exclude, count) => {
@@ -57690,9 +58057,10 @@ function run() {
                 console.log('[Main] Custom workflow completed');
             }
             else {
-                // Default: simple auto purchase
+                // Default: lotto auto purchase plus pension720 all-groups auto purchase.
                 console.log(`[Main] Running default auto purchase: ${amount} games`);
                 yield api.purchaseAuto(amount);
+                yield api.purchasePension720();
             }
             console.log(`[Main] All purchases completed: ${purchases.length} total purchases`);
         }
@@ -57727,8 +58095,9 @@ function run() {
                 try {
                     yield attachRemainingBalance(session, purchases);
                     yield createConsolidatedIssue(purchases);
-                    const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
-                    console.log(`[Main] Created consolidated issue for ${purchases.length} purchases (${totalGames} total games)`);
+                    const totalLottoGames = purchases.reduce((sum, p) => sum + (p.product === 'lotto645' ? p.numbers.length : 0), 0);
+                    const totalPensionTickets = purchases.reduce((sum, p) => sum + (p.product === 'pension720' ? p.ticketCount : 0), 0);
+                    console.log(`[Main] Processed ${purchases.length} purchases (${totalLottoGames} lotto games, ${totalPensionTickets} pension720 tickets)`);
                     // Send Telegram notification for purchases
                     yield notifyPurchase(purchases);
                 }

@@ -1,8 +1,8 @@
 # 🎰 동행복권 로또 자동구매
 
-**실제 동행복권 계정으로 로또 6/45를 자동 구매하는 GitHub Action입니다.**
+**실제 동행복권 계정으로 로또 6/45와 연금복권720+를 자동 구매하는 GitHub Action입니다.**
 
-매주 정해진 시간에 GitHub Actions가 실행되어, 실제 동행복권 사이트에 로그인하고 로또를 구매합니다. 구매 결과는 [GitHub Issue](https://github.com/kkd927/lotto-purchase-action/issues/1)로 기록되며, 추첨 후 당첨 여부도 자동으로 확인됩니다.
+매주 정해진 시간에 GitHub Actions가 실행되어, 실제 동행복권 사이트에 로그인하고 로또와 연금복권720+를 구매합니다. 로또 구매 결과는 [GitHub Issue](https://github.com/kkd927/lotto-purchase-action/issues/1)로 기록되며, 추첨 후 당첨 여부도 자동으로 확인됩니다. 연금복권720+ 구매 결과는 텔레그램 알림에 함께 포함됩니다.
 
 ## ✨ 주요 기능
 
@@ -11,6 +11,7 @@
 | 🤖 **자동번호 구매** | 게임 수만 정하면 번호는 자동 생성 |
 | ✍️ **수동번호 구매** | 내가 원하는 번호를 직접 지정해서 구매 |
 | 🔀 **자동 + 수동 조합** | 한 번에 자동과 수동을 섞어서 구매 |
+| 🎫 **연금복권720+ 구매** | 모든조 자동번호 5매(5,000원) 구매 |
 | 🧩 **커스텀 로직** | JS 파일 하나로 나만의 구매 전략을 자유롭게 작성 |
 | 💡 **AI 연동** | Gemini API로 추천 번호를 받아 구매하는 예제 포함 |
 | 📋 **결과 기록** | 구매 내역이 GitHub Issue에 자동 정리 ([예시](https://github.com/kkd927/lotto-purchase-action/issues/1)) |
@@ -88,7 +89,7 @@ workflow-file: custom-workflows/01-auto-basic.js
 
 | 예제 | 설명 |
 | --- | --- |
-| `01-auto-basic.js` | 자동 5게임 구매 |
+| `01-auto-basic.js` | 로또 자동 5게임 + 연금복권720+ 5매 구매 |
 | `02-manual-fixed-numbers.js` | 고정 번호 수동 구매 |
 | `03-auto-plus-manual.js` | 자동 + 수동 조합 구매 |
 | `04-gemini-recommendation.js` | Gemini API 추천 번호 구매 |
@@ -96,7 +97,7 @@ workflow-file: custom-workflows/01-auto-basic.js
 <details>
 <summary><b>나만의 구매 전략 만들기</b></summary>
 
-`purchaseAuto`와 `purchaseManual` API를 조합하면 어떤 전략이든 JS로 작성할 수 있습니다.
+`purchaseAuto`, `purchaseManual`, `purchasePension720` API를 조합하면 어떤 전략이든 JS로 작성할 수 있습니다.
 
 ```javascript
 // 예: 자동 3게임 + 고정번호 수동 2게임
@@ -106,6 +107,14 @@ export default async ({ purchaseAuto, purchaseManual }) => {
     [3, 11, 19, 25, 33, 42],
     [7, 14, 21, 28, 35, 40],
   ]);
+};
+```
+
+```javascript
+// 예: 로또 자동 5게임 + 연금복권720+ 5매
+export default async ({ purchaseAuto, purchasePension720 }) => {
+  await purchaseAuto(5);
+  await purchasePension720();
 };
 ```
 

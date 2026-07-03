@@ -1,5 +1,5 @@
 name: 'lotto-purchase-action'
-description: '동행복권 로또 6/45 자동 구매를 위한 GitHub Action. 자동/수동 구매 및 커스텀 워크플로우를 지원합니다.'
+description: '동행복권 로또 6/45와 연금복권720+ 자동 구매를 위한 GitHub Action. 커스텀 워크플로우를 지원합니다.'
 branding:
   icon: 'award'
   color: 'green'

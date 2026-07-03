@@ -2,6 +2,7 @@ import { getOctokit, getRepo, getContext } from './client';
 import { fetchWinningNumbers, checkWinning, getCheckWinningLink } from '../utils/winning';
 import { getLastLottoRound, getNextLottoRound } from '../utils/rounds';
 import { formatWon, type InsufficientBalanceDetails } from '../core/errors';
+import type { LottoPurchaseMetadata, PurchaseMetadata } from '../core/types';
 
 // Labels for GitHub Issues
 const LABELS = {
@@ -53,15 +54,17 @@ export async function createPurchaseIssue(numbers: number[][]): Promise<void> {
   console.log(`Created issue for ${numbers.length} games on ${date}`);
 }
 
-// Purchase metadata interface
-export interface PurchaseMetadata {
-  type: 'auto' | 'manual';
-  numbers: number[][];
-  timestamp: string;
-}
-
 // Create a consolidated GitHub Issue for multiple purchases
 export async function createConsolidatedIssue(purchases: PurchaseMetadata[]): Promise<void> {
+  const lottoPurchases = purchases.filter(
+    (purchase): purchase is LottoPurchaseMetadata => purchase.product === 'lotto645'
+  );
+
+  if (lottoPurchases.length === 0) {
+    console.log('[Issues] No lotto645 purchases to create a winning-check issue');
+    return;
+  }
+
   const octokit = getOctokit();
   const repo = getRepo();
 
@@ -69,9 +72,9 @@ export async function createConsolidatedIssue(purchases: PurchaseMetadata[]): Pr
   const round = getNextLottoRound();
 
   // Calculate total games
-  const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
+  const totalGames = lottoPurchases.reduce((sum, p) => sum + p.numbers.length, 0);
 
-  const body = buildConsolidatedIssueBody(purchases, round, workflowRun);
+  const body = buildConsolidatedIssueBody(lottoPurchases, round, workflowRun);
 
   await octokit.rest.issues.create({
     ...repo,
@@ -81,7 +84,7 @@ export async function createConsolidatedIssue(purchases: PurchaseMetadata[]): Pr
   });
 
   console.log(
-    `Created consolidated issue for ${purchases.length} purchases (${totalGames} total games) for round ${round}`
+    `Created consolidated issue for ${lottoPurchases.length} lotto purchases (${totalGames} total games) for round ${round}`
   );
 }
 
@@ -95,7 +98,7 @@ export async function createPurchaseFailureIssue(details: InsufficientBalanceDet
 
   await octokit.rest.issues.create({
     ...repo,
-    title: `로또 구매 실패 - 예치금 부족 (${new Date().toISOString().slice(0, 10)})`,
+    title: `복권 구매 실패 - 예치금 부족 (${new Date().toISOString().slice(0, 10)})`,
     body: buildPurchaseFailureIssueBody(details, message, workflowRun),
     labels: [LABELS.purchase_failure]
   });
@@ -345,7 +348,7 @@ function buildIssueBody(data: { date: string; round: number; numbers: number[][]
 }
 
 // Helper: Build consolidated issue body with multiple purchases
-function buildConsolidatedIssueBody(purchases: PurchaseMetadata[], round: number, workflowRun: string): string {
+function buildConsolidatedIssueBody(purchases: LottoPurchaseMetadata[], round: number, workflowRun: string): string {
   const header = `workflow_run: ${workflowRun}\nround: ${round}\n`;
 
   const sections = purchases.map((purchase, index) => {

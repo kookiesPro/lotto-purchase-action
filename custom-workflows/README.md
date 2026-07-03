@@ -13,7 +13,7 @@
 
 | 파일                          | 용도                                      | 수정 포인트                         |
 | ----------------------------- | ----------------------------------------- | ----------------------------------- |
-| `01-auto-basic.js`            | 가장 먼저 실행해보기 좋은 기본 예제       | `GAME_COUNT`                        |
+| `01-auto-basic.js`            | 로또 자동 구매와 연금복권720+ 구매 기본 예제 | `GAME_COUNT`                        |
 | `02-manual-fixed-numbers.js`  | 고정 번호를 직접 넣어 수동 구매할 때      | `NUMBERS`                           |
 | `03-auto-plus-manual.js`      | 자동 구매와 수동 구매를 함께 쓰고 싶을 때 | `AUTO_GAME_COUNT`, `MANUAL_NUMBERS` |
 | `04-gemini-recommendation.js` | Gemini API로 추천 번호를 받아 구매할 때   | `MODEL`, `FALLBACK_NUMBERS`         |
@@ -72,6 +72,17 @@ await purchaseManual([
 - 한 번에 최대 `5`게임까지 구매할 수 있습니다.
 - 반환값: `Promise<number[][]>`
 
+### `purchasePension720(amount?)`
+
+연금복권720+ 모든조 자동번호 5매를 구매합니다.
+
+```javascript
+const result = await purchasePension720();
+```
+
+- `amount`: 생략 가능. 현재는 `5000`원 구매만 지원합니다.
+- 반환값: 구매회차, 거래번호, 구매금액, 티켓 번호 목록을 담은 `Promise<object>`
+
 ### `generateExcluding(exclude, count)`
 
 특정 번호들을 제외하고 랜덤 번호를 생성합니다.
@@ -108,7 +119,7 @@ Gemini 응답이 비어 있거나 형식이 맞지 않으면 예제 파일 안�
 - 가장 단순한 시작점은 `01-auto-basic.js`입니다.
 - 번호를 직접 넣고 싶으면 `02-manual-fixed-numbers.js`를 복사해서 배열만 바꾸면 됩니다.
 - 여러 전략을 섞고 싶으면 `03-auto-plus-manual.js`를 기준으로 수정하면 됩니다.
-- `purchaseAuto`와 `purchaseManual`은 한 workflow 안에서 여러 번 호출해도 됩니다.
+- `purchaseAuto`, `purchaseManual`, `purchasePension720`은 한 workflow 안에서 여러 번 호출해도 됩니다.
 
 ## 자주 막히는 경우
 

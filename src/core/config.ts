@@ -5,6 +5,8 @@ export const URLS = {
   LOGOUT: 'https://www.dhlottery.co.kr/logout.do',
   MYPAGE_HOME: 'https://www.dhlottery.co.kr/mypage/home',
   LOTTO_645: 'https://ol.dhlottery.co.kr/olotto/game/game645.do',
+  PENSION_720_MOBILE: 'https://el.dhlottery.co.kr/game_mobile/pension720/game.jsp',
+  PENSION_720_LEDGER: 'https://www.dhlottery.co.kr/mypage/mylotteryledger?lottoId=LP72',
   CHECK_WINNING: 'https://www.dhlottery.co.kr/qr.do'
 };
 
