@@ -57607,8 +57607,9 @@ function createPurchaseFailureIssue(details, message) {
         const workflowRun = getContext().runId
             ? `https://github.com/${repo.owner}/${repo.repo}/actions/runs/${getContext().runId}`
             : '';
-        yield octokit.rest.issues.create(Object.assign(Object.assign({}, repo), { title: `복권 구매 실패 - 예치금 부족 (${new Date().toISOString().slice(0, 10)})`, body: buildPurchaseFailureIssueBody(details, message, workflowRun), labels: [LABELS.purchase_failure] }));
-        console.log('[Issues] Created purchase failure issue for insufficient balance');
+        const reason = details ? '예치금 부족' : '구매 오류';
+        yield octokit.rest.issues.create(Object.assign(Object.assign({}, repo), { title: `복권 구매 실패 - ${reason} (${new Date().toISOString().slice(0, 10)})`, body: buildPurchaseFailureIssueBody(details, message, workflowRun), labels: [LABELS.purchase_failure] }));
+        console.log('[Issues] Created purchase failure issue');
     });
 }
 // Get all waiting issues (bug fix: get ALL open issues with waiting label)
@@ -57796,16 +57797,23 @@ function buildConsolidatedIssueBody(purchases, round, workflowRun) {
     return header + sections.join('\n');
 }
 function buildPurchaseFailureIssueBody(details, message, workflowRun) {
+    const amountSection = details
+        ? `## 금액\n` +
+            `- 현재 예치금: ${formatWon(details.currentBalance)}\n` +
+            `- 필요 금액: ${formatWon(details.requiredAmount)}\n` +
+            `- 부족 금액: ${formatWon(details.shortage)}\n`
+        : '';
     return (`status: failed\n` +
-        `reason: insufficient_balance\n` +
+        `reason: ${details ? 'insufficient_balance' : 'purchase_error'}\n` +
         `timestamp: ${new Date().toISOString()}\n` +
-        `current_balance: ${details.currentBalance}\n` +
+        (details ? `current_balance: ${details.currentBalance}\n` : '') +
         (workflowRun ? `workflow_run: ${workflowRun}\n` : '') +
         `\n` +
         `## 구매 실패 사유\n` +
         `${message}\n\n` +
-        `## 금액\n` +
-        `- 현재 예치금: ${formatWon(details.currentBalance)}\n`);
+        `## 처리\n` +
+        `GitHub Actions job은 실패 처리하지 않고 정상 종료되도록 처리했습니다.\n\n` +
+        amountSection);
 }
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org/bot';
@@ -57928,16 +57936,39 @@ function notifyPurchaseFailure(details, message) {
     return __awaiter$3(this, void 0, void 0, function* () {
         if (!isEnabled())
             return;
+        const amountFeedback = details
+            ? `\n\n` +
+                `현재 예치금: ${formatWon(details.currentBalance)}\n` +
+                `필요 금액: ${formatWon(details.requiredAmount)}\n` +
+                `부족 금액: ${formatWon(details.shortage)}`
+            : '';
         const notification = `⚠️ *복권 구매 실패*\n\n` +
-            `${message}\n\n` +
-            `현재 예치금: ${formatWon(details.currentBalance)}\n` +
-            `필요 금액: ${formatWon(details.requiredAmount)}\n` +
-            `부족 금액: ${formatWon(details.shortage)}`;
+            `구매가 완료되지 않았습니다.\n\n` +
+            `사유: ${message}` +
+            amountFeedback +
+            `\n\nGitHub Actions는 실패 처리하지 않고 정상 종료했습니다.`;
         console.log('[Telegram] Sending purchase failure notification');
         yield sendMessage(notification);
     });
 }
 
+function reportPurchaseFailure(error, message) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        const details = isInsufficientBalanceError(error) ? error.details : undefined;
+        try {
+            yield createPurchaseFailureIssue(details, message);
+        }
+        catch (issueError) {
+            console.error('[Main] Failed to create purchase failure issue:', issueError);
+        }
+        try {
+            yield notifyPurchaseFailure(details, message);
+        }
+        catch (telegramError) {
+            console.error('[Main] Failed to notify purchase failure via Telegram:', telegramError);
+        }
+    });
+}
 function attachRemainingBalance(session, purchases) {
     return __awaiter$3(this, void 0, void 0, function* () {
         const latestPurchase = purchases[purchases.length - 1];
@@ -57986,6 +58017,7 @@ function run() {
     return __awaiter$3(this, void 0, void 0, function* () {
         const session = new BrowserSession();
         const purchases = []; // Track all successful purchases
+        let purchaseWorkflowStarted = false;
         try {
             // Get inputs
             const id = coreExports.getInput('dhlottery-id', { required: true });
@@ -58053,39 +58085,28 @@ function run() {
             if (workflowFile) {
                 console.log(`[Main] Loading custom workflow from: ${workflowFile}`);
                 const workflow = yield loadWorkflow(workflowFile);
+                purchaseWorkflowStarted = true;
                 yield workflow(api);
                 console.log('[Main] Custom workflow completed');
             }
             else {
                 // Default: lotto auto purchase plus pension720 all-groups auto purchase.
                 console.log(`[Main] Running default auto purchase: ${amount} games`);
+                purchaseWorkflowStarted = true;
                 yield api.purchaseAuto(amount);
                 yield api.purchasePension720();
             }
             console.log(`[Main] All purchases completed: ${purchases.length} total purchases`);
         }
         catch (error) {
-            if (error instanceof Error) {
-                console.error('[Main] Workflow error:', error.message);
-                coreExports.setFailed(error.message);
-                if (isInsufficientBalanceError(error)) {
-                    try {
-                        yield createPurchaseFailureIssue(error.details, error.message);
-                    }
-                    catch (issueError) {
-                        console.error('[Main] Failed to create purchase failure issue:', issueError);
-                    }
-                    try {
-                        yield notifyPurchaseFailure(error.details, error.message);
-                    }
-                    catch (telegramError) {
-                        console.error('[Main] Failed to notify purchase failure via Telegram:', telegramError);
-                    }
-                }
+            const message = error instanceof Error ? error.message : String(error);
+            console.error('[Main] Workflow error:', message);
+            if (purchaseWorkflowStarted) {
+                coreExports.warning(`복권 구매 실패: ${message}`);
+                yield reportPurchaseFailure(error, message);
             }
             else {
-                console.error('[Main] Workflow error:', error);
-                coreExports.setFailed(String(error));
+                coreExports.setFailed(message);
             }
             // Continue to create issues for successful purchases
         }

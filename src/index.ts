@@ -19,6 +19,22 @@ interface WorkflowApi {
 
 type CustomWorkflow = (api: WorkflowApi) => Promise<unknown> | unknown;
 
+async function reportPurchaseFailure(error: unknown, message: string): Promise<void> {
+  const details = isInsufficientBalanceError(error) ? error.details : undefined;
+
+  try {
+    await createPurchaseFailureIssue(details, message);
+  } catch (issueError) {
+    console.error('[Main] Failed to create purchase failure issue:', issueError);
+  }
+
+  try {
+    await notifyPurchaseFailure(details, message);
+  } catch (telegramError) {
+    console.error('[Main] Failed to notify purchase failure via Telegram:', telegramError);
+  }
+}
+
 async function attachRemainingBalance(session: BrowserSession, purchases: PurchaseMetadata[]): Promise<void> {
   const latestPurchase = purchases[purchases.length - 1];
   if (!latestPurchase) {
@@ -71,6 +87,7 @@ async function loadWorkflow(workflowFile: string): Promise<CustomWorkflow> {
 async function run() {
   const session = new BrowserSession();
   const purchases: PurchaseMetadata[] = []; // Track all successful purchases
+  let purchaseWorkflowStarted = false;
 
   try {
     // Get inputs
@@ -150,37 +167,27 @@ async function run() {
     if (workflowFile) {
       console.log(`[Main] Loading custom workflow from: ${workflowFile}`);
       const workflow = await loadWorkflow(workflowFile);
+      purchaseWorkflowStarted = true;
       await workflow(api);
       console.log('[Main] Custom workflow completed');
     } else {
       // Default: lotto auto purchase plus pension720 all-groups auto purchase.
       console.log(`[Main] Running default auto purchase: ${amount} games`);
+      purchaseWorkflowStarted = true;
       await api.purchaseAuto(amount);
       await api.purchasePension720();
     }
 
     console.log(`[Main] All purchases completed: ${purchases.length} total purchases`);
   } catch (error) {
-    if (error instanceof Error) {
-      console.error('[Main] Workflow error:', error.message);
-      core.setFailed(error.message);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[Main] Workflow error:', message);
 
-      if (isInsufficientBalanceError(error)) {
-        try {
-          await createPurchaseFailureIssue(error.details, error.message);
-        } catch (issueError) {
-          console.error('[Main] Failed to create purchase failure issue:', issueError);
-        }
-
-        try {
-          await notifyPurchaseFailure(error.details, error.message);
-        } catch (telegramError) {
-          console.error('[Main] Failed to notify purchase failure via Telegram:', telegramError);
-        }
-      }
+    if (purchaseWorkflowStarted) {
+      core.warning(`복권 구매 실패: ${message}`);
+      await reportPurchaseFailure(error, message);
     } else {
-      console.error('[Main] Workflow error:', error);
-      core.setFailed(String(error));
+      core.setFailed(message);
     }
     // Continue to create issues for successful purchases
   } finally {

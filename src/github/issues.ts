@@ -89,21 +89,25 @@ export async function createConsolidatedIssue(purchases: PurchaseMetadata[]): Pr
 }
 
 // Create a GitHub Issue for a purchase failure that needs user action
-export async function createPurchaseFailureIssue(details: InsufficientBalanceDetails, message: string): Promise<void> {
+export async function createPurchaseFailureIssue(
+  details: InsufficientBalanceDetails | undefined,
+  message: string
+): Promise<void> {
   const octokit = getOctokit();
   const repo = getRepo();
   const workflowRun = getContext().runId
     ? `https://github.com/${repo.owner}/${repo.repo}/actions/runs/${getContext().runId}`
     : '';
+  const reason = details ? '예치금 부족' : '구매 오류';
 
   await octokit.rest.issues.create({
     ...repo,
-    title: `복권 구매 실패 - 예치금 부족 (${new Date().toISOString().slice(0, 10)})`,
+    title: `복권 구매 실패 - ${reason} (${new Date().toISOString().slice(0, 10)})`,
     body: buildPurchaseFailureIssueBody(details, message, workflowRun),
     labels: [LABELS.purchase_failure]
   });
 
-  console.log('[Issues] Created purchase failure issue for insufficient balance');
+  console.log('[Issues] Created purchase failure issue');
 }
 
 // Get all waiting issues (bug fix: get ALL open issues with waiting label)
@@ -368,20 +372,28 @@ function buildConsolidatedIssueBody(purchases: LottoPurchaseMetadata[], round: n
 }
 
 function buildPurchaseFailureIssueBody(
-  details: InsufficientBalanceDetails,
+  details: InsufficientBalanceDetails | undefined,
   message: string,
   workflowRun: string
 ): string {
+  const amountSection = details
+    ? `## 금액\n` +
+      `- 현재 예치금: ${formatWon(details.currentBalance)}\n` +
+      `- 필요 금액: ${formatWon(details.requiredAmount)}\n` +
+      `- 부족 금액: ${formatWon(details.shortage)}\n`
+    : '';
+
   return (
     `status: failed\n` +
-    `reason: insufficient_balance\n` +
+    `reason: ${details ? 'insufficient_balance' : 'purchase_error'}\n` +
     `timestamp: ${new Date().toISOString()}\n` +
-    `current_balance: ${details.currentBalance}\n` +
+    (details ? `current_balance: ${details.currentBalance}\n` : '') +
     (workflowRun ? `workflow_run: ${workflowRun}\n` : '') +
     `\n` +
     `## 구매 실패 사유\n` +
     `${message}\n\n` +
-    `## 금액\n` +
-    `- 현재 예치금: ${formatWon(details.currentBalance)}\n`
+    `## 처리\n` +
+    `GitHub Actions job은 실패 처리하지 않고 정상 종료되도록 처리했습니다.\n\n` +
+    amountSection
   );
 }

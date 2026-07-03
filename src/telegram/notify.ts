@@ -104,15 +104,24 @@ export async function notifyWinning(issueNumber: number, round: number, ranks: n
 }
 
 // Send purchase failure notification to Telegram
-export async function notifyPurchaseFailure(details: InsufficientBalanceDetails, message: string): Promise<void> {
+export async function notifyPurchaseFailure(
+  details: InsufficientBalanceDetails | undefined,
+  message: string
+): Promise<void> {
   if (!isEnabled()) return;
 
+  const amountFeedback = details
+    ? `\n\n` +
+      `현재 예치금: ${formatWon(details.currentBalance)}\n` +
+      `필요 금액: ${formatWon(details.requiredAmount)}\n` +
+      `부족 금액: ${formatWon(details.shortage)}`
+    : '';
   const notification =
     `⚠️ *복권 구매 실패*\n\n` +
-    `${message}\n\n` +
-    `현재 예치금: ${formatWon(details.currentBalance)}\n` +
-    `필요 금액: ${formatWon(details.requiredAmount)}\n` +
-    `부족 금액: ${formatWon(details.shortage)}`;
+    `구매가 완료되지 않았습니다.\n\n` +
+    `사유: ${message}` +
+    amountFeedback +
+    `\n\nGitHub Actions는 실패 처리하지 않고 정상 종료했습니다.`;
 
   console.log('[Telegram] Sending purchase failure notification');
   await sendMessage(notification);
