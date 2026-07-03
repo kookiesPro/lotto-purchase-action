@@ -19,6 +19,16 @@ interface WorkflowApi {
 
 type CustomWorkflow = (api: WorkflowApi) => Promise<unknown> | unknown;
 
+interface PurchaseStepFailure {
+  label: string;
+  error: unknown;
+  message: string;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function reportPurchaseFailure(error: unknown, message: string): Promise<void> {
   const details = isInsufficientBalanceError(error) ? error.details : undefined;
 
@@ -33,6 +43,33 @@ async function reportPurchaseFailure(error: unknown, message: string): Promise<v
   } catch (telegramError) {
     console.error('[Main] Failed to notify purchase failure via Telegram:', telegramError);
   }
+}
+
+async function executePurchaseStep<T>(
+  label: string,
+  task: () => Promise<T>,
+  failures: PurchaseStepFailure[]
+): Promise<T | undefined> {
+  try {
+    return await task();
+  } catch (error) {
+    const message = getErrorMessage(error);
+    failures.push({ label, error, message });
+    console.warn(`[Main] ${label} failed, continuing with next purchase step: ${message}`);
+    return undefined;
+  }
+}
+
+function throwPurchaseStepFailures(failures: PurchaseStepFailure[]): void {
+  if (failures.length === 0) {
+    return;
+  }
+
+  if (failures.length === 1) {
+    throw failures[0]!.error;
+  }
+
+  throw new Error(failures.map(failure => `${failure.label}: ${failure.message}`).join('\n'));
 }
 
 async function attachRemainingBalance(session: BrowserSession, purchases: PurchaseMetadata[]): Promise<void> {
@@ -174,13 +211,15 @@ async function run() {
       // Default: lotto auto purchase plus pension720 all-groups auto purchase.
       console.log(`[Main] Running default auto purchase: ${amount} games`);
       purchaseWorkflowStarted = true;
-      await api.purchaseAuto(amount);
-      await api.purchasePension720();
+      const purchaseStepFailures: PurchaseStepFailure[] = [];
+      await executePurchaseStep(`로또 자동 구매 ${amount}게임`, () => api.purchaseAuto(amount), purchaseStepFailures);
+      await executePurchaseStep('연금복권720+ 구매', () => api.purchasePension720(), purchaseStepFailures);
+      throwPurchaseStepFailures(purchaseStepFailures);
     }
 
     console.log(`[Main] All purchases completed: ${purchases.length} total purchases`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = getErrorMessage(error);
     console.error('[Main] Workflow error:', message);
 
     if (purchaseWorkflowStarted) {

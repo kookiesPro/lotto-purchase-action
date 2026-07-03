@@ -10,11 +10,32 @@ const GAME_COUNT = 5;
 
 export default async ({ purchaseAuto, purchasePension720 }) => {
   console.log('=== 01-auto-basic 시작 ===');
+  const failures = [];
+
   console.log(`로또 자동 구매 ${GAME_COUNT}게임을 진행합니다.`);
+  try {
+    const lottoPurchased = await purchaseAuto(GAME_COUNT);
+    console.log('로또 구매 완료:', lottoPurchased);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    failures.push({ name: '로또 자동 구매', error, message });
+    console.warn(`로또 구매 실패, 연금복권720+ 구매를 계속 진행합니다: ${message}`);
+  }
 
-  const lottoPurchased = await purchaseAuto(GAME_COUNT);
-  const pensionPurchased = await purchasePension720();
+  try {
+    const pensionPurchased = await purchasePension720();
+    console.log('연금복권720+ 구매 완료:', pensionPurchased);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    failures.push({ name: '연금복권720+ 구매', error, message });
+    console.warn(`연금복권720+ 구매 실패: ${message}`);
+  }
 
-  console.log('로또 구매 완료:', lottoPurchased);
-  console.log('연금복권720+ 구매 완료:', pensionPurchased);
+  if (failures.length === 1) {
+    throw failures[0].error;
+  }
+
+  if (failures.length > 1) {
+    throw new Error(failures.map(failure => `${failure.name}: ${failure.message}`).join('\n'));
+  }
 };

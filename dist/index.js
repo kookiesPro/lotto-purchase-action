@@ -57952,6 +57952,9 @@ function notifyPurchaseFailure(details, message) {
     });
 }
 
+function getErrorMessage(error) {
+    return error instanceof Error ? error.message : String(error);
+}
 function reportPurchaseFailure(error, message) {
     return __awaiter$3(this, void 0, void 0, function* () {
         const details = isInsufficientBalanceError(error) ? error.details : undefined;
@@ -57968,6 +57971,28 @@ function reportPurchaseFailure(error, message) {
             console.error('[Main] Failed to notify purchase failure via Telegram:', telegramError);
         }
     });
+}
+function executePurchaseStep(label, task, failures) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        try {
+            return yield task();
+        }
+        catch (error) {
+            const message = getErrorMessage(error);
+            failures.push({ label, error, message });
+            console.warn(`[Main] ${label} failed, continuing with next purchase step: ${message}`);
+            return undefined;
+        }
+    });
+}
+function throwPurchaseStepFailures(failures) {
+    if (failures.length === 0) {
+        return;
+    }
+    if (failures.length === 1) {
+        throw failures[0].error;
+    }
+    throw new Error(failures.map(failure => `${failure.label}: ${failure.message}`).join('\n'));
 }
 function attachRemainingBalance(session, purchases) {
     return __awaiter$3(this, void 0, void 0, function* () {
@@ -58093,13 +58118,15 @@ function run() {
                 // Default: lotto auto purchase plus pension720 all-groups auto purchase.
                 console.log(`[Main] Running default auto purchase: ${amount} games`);
                 purchaseWorkflowStarted = true;
-                yield api.purchaseAuto(amount);
-                yield api.purchasePension720();
+                const purchaseStepFailures = [];
+                yield executePurchaseStep(`로또 자동 구매 ${amount}게임`, () => api.purchaseAuto(amount), purchaseStepFailures);
+                yield executePurchaseStep('연금복권720+ 구매', () => api.purchasePension720(), purchaseStepFailures);
+                throwPurchaseStepFailures(purchaseStepFailures);
             }
             console.log(`[Main] All purchases completed: ${purchases.length} total purchases`);
         }
         catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
+            const message = getErrorMessage(error);
             console.error('[Main] Workflow error:', message);
             if (purchaseWorkflowStarted) {
                 coreExports.warning(`복권 구매 실패: ${message}`);
