@@ -139,7 +139,7 @@ async function readDepositBalance(page: Page): Promise<number | null> {
   return parseDepositBalance(bodyText);
 }
 
-async function getDepositBalance(session: BrowserSession): Promise<number> {
+export async function getDepositBalance(session: BrowserSession): Promise<number> {
   const page = session.getPage();
 
   console.log('[Purchase] Checking deposit balance');

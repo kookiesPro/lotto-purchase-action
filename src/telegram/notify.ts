@@ -7,6 +7,26 @@ interface PurchaseMetadata {
   type: 'auto' | 'manual';
   numbers: number[][];
   timestamp: string;
+  remainingBalance?: number;
+  balanceCheckError?: string;
+}
+
+function getBalanceFeedback(purchases: PurchaseMetadata[]): string | null {
+  for (let index = purchases.length - 1; index >= 0; index--) {
+    const checkedPurchase = purchases[index]!;
+
+    if (checkedPurchase.remainingBalance === undefined && checkedPurchase.balanceCheckError === undefined) {
+      continue;
+    }
+
+    if (checkedPurchase.remainingBalance !== undefined) {
+      return `잔여 예치금: ${formatWon(checkedPurchase.remainingBalance)}`;
+    }
+
+    return '잔여 예치금: 확인 실패';
+  }
+
+  return null;
 }
 
 // Send purchase notification to Telegram
@@ -15,6 +35,7 @@ export async function notifyPurchase(purchases: PurchaseMetadata[]): Promise<voi
 
   const round = getNextLottoRound();
   const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
+  const balanceFeedback = getBalanceFeedback(purchases);
 
   const sections = purchases.map((purchase, index) => {
     const typeLabel = purchase.type === 'auto' ? '자동' : '수동';
@@ -24,7 +45,8 @@ export async function notifyPurchase(purchases: PurchaseMetadata[]): Promise<voi
     return `*#${index + 1} (${typeLabel})*\n${numbersText}\n[당첨확인](${link})`;
   });
 
-  const message = `🎰 *제${round}회 로또 구매 완료*\n` + `총 ${totalGames}게임\n\n` + sections.join('\n\n');
+  const summary = [`총 ${totalGames}게임`, balanceFeedback].filter(Boolean).join('\n');
+  const message = `🎰 *제${round}회 로또 구매 완료*\n` + `${summary}\n\n` + sections.join('\n\n');
 
   console.log('[Telegram] Sending purchase notification');
   await sendMessage(message);

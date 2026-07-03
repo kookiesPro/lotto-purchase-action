@@ -2,7 +2,7 @@ import * as core from '@actions/core';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { BrowserSession } from './core/browser';
-import { purchaseAuto, purchaseManual } from './core/purchase';
+import { getDepositBalance, purchaseAuto, purchaseManual } from './core/purchase';
 import { isInsufficientBalanceError } from './core/errors';
 import { generateExcluding } from './utils/numbers';
 import { initLabels, createConsolidatedIssue, createPurchaseFailureIssue, checkWinningIssues } from './github/issues';
@@ -12,6 +12,9 @@ interface PurchaseMetadata {
   type: 'auto' | 'manual';
   numbers: number[][];
   timestamp: string;
+  remainingBalance?: number;
+  balanceCheckedAt?: string;
+  balanceCheckError?: string;
 }
 
 interface WorkflowApi {
@@ -21,6 +24,23 @@ interface WorkflowApi {
 }
 
 type CustomWorkflow = (api: WorkflowApi) => Promise<unknown> | unknown;
+
+async function attachRemainingBalance(session: BrowserSession, purchases: PurchaseMetadata[]): Promise<void> {
+  const latestPurchase = purchases[purchases.length - 1];
+  if (!latestPurchase) {
+    return;
+  }
+
+  try {
+    latestPurchase.remainingBalance = await getDepositBalance(session);
+    latestPurchase.balanceCheckedAt = new Date().toISOString();
+    console.log(`[Main] Remaining deposit balance checked: ${latestPurchase.remainingBalance}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    latestPurchase.balanceCheckError = message;
+    console.warn('[Main] Failed to check remaining deposit balance after purchase:', message);
+  }
+}
 
 async function loadWorkflow(workflowFile: string): Promise<CustomWorkflow> {
   const resolvedPath = path.resolve(process.cwd(), workflowFile);
@@ -160,6 +180,7 @@ async function run() {
     // Create one consolidated issue for all successful purchases
     if (purchases.length > 0) {
       try {
+        await attachRemainingBalance(session, purchases);
         await createConsolidatedIssue(purchases);
         const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
         console.log(`[Main] Created consolidated issue for ${purchases.length} purchases (${totalGames} total games)`);

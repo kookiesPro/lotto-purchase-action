@@ -57521,6 +57521,19 @@ function sendMessage(text) {
     });
 }
 
+function getBalanceFeedback(purchases) {
+    for (let index = purchases.length - 1; index >= 0; index--) {
+        const checkedPurchase = purchases[index];
+        if (checkedPurchase.remainingBalance === undefined && checkedPurchase.balanceCheckError === undefined) {
+            continue;
+        }
+        if (checkedPurchase.remainingBalance !== undefined) {
+            return `잔여 예치금: ${formatWon(checkedPurchase.remainingBalance)}`;
+        }
+        return '잔여 예치금: 확인 실패';
+    }
+    return null;
+}
 // Send purchase notification to Telegram
 function notifyPurchase(purchases) {
     return __awaiter$3(this, void 0, void 0, function* () {
@@ -57528,13 +57541,15 @@ function notifyPurchase(purchases) {
             return;
         const round = getNextLottoRound();
         const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
+        const balanceFeedback = getBalanceFeedback(purchases);
         const sections = purchases.map((purchase, index) => {
             const typeLabel = purchase.type === 'auto' ? '자동' : '수동';
             const link = getCheckWinningLink(purchase.numbers, round);
             const numbersText = purchase.numbers.map((nums, i) => `  ${i + 1}. \`${nums.join(', ')}\``).join('\n');
             return `*#${index + 1} (${typeLabel})*\n${numbersText}\n[당첨확인](${link})`;
         });
-        const message = `🎰 *제${round}회 로또 구매 완료*\n` + `총 ${totalGames}게임\n\n` + sections.join('\n\n');
+        const summary = [`총 ${totalGames}게임`, balanceFeedback].filter(Boolean).join('\n');
+        const message = `🎰 *제${round}회 로또 구매 완료*\n` + `${summary}\n\n` + sections.join('\n\n');
         console.log('[Telegram] Sending purchase notification');
         yield sendMessage(message);
     });
@@ -57565,6 +57580,24 @@ function notifyPurchaseFailure(details, message) {
     });
 }
 
+function attachRemainingBalance(session, purchases) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        const latestPurchase = purchases[purchases.length - 1];
+        if (!latestPurchase) {
+            return;
+        }
+        try {
+            latestPurchase.remainingBalance = yield getDepositBalance(session);
+            latestPurchase.balanceCheckedAt = new Date().toISOString();
+            console.log(`[Main] Remaining deposit balance checked: ${latestPurchase.remainingBalance}`);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            latestPurchase.balanceCheckError = message;
+            console.warn('[Main] Failed to check remaining deposit balance after purchase:', message);
+        }
+    });
+}
 function loadWorkflow(workflowFile) {
     return __awaiter$3(this, void 0, void 0, function* () {
         const resolvedPath = require$$1__namespace.resolve(process.cwd(), workflowFile);
@@ -57692,6 +57725,7 @@ function run() {
             // Create one consolidated issue for all successful purchases
             if (purchases.length > 0) {
                 try {
+                    yield attachRemainingBalance(session, purchases);
                     yield createConsolidatedIssue(purchases);
                     const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
                     console.log(`[Main] Created consolidated issue for ${purchases.length} purchases (${totalGames} total games)`);
