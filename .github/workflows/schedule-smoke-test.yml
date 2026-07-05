@@ -3,7 +3,7 @@ name: 스케줄 동작 확인 (구매 없음)
 on:
   schedule:
     # 테스트용: GitHub schedule 이벤트가 저장소에서 도는지 확인합니다. 실제 구매는 하지 않습니다.
-    # Billing 설정 변경 후 schedule 등록을 다시 유도하기 위해 워크플로를 갱신했습니다.
+    # Actions budget Stop usage 해제 후 schedule 등록을 다시 유도하기 위해 워크플로를 갱신했습니다.
     - cron: '*/5 * * * *'
   workflow_dispatch:
 
