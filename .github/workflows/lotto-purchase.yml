@@ -1,10 +1,10 @@
 name: 로또/연금복권 구매 (수동 + 스케줄)
 on:
   schedule:
-    # 테스트용: 2026-07-05 UTC 05:18 (한국 시간 일요일 14:18)
+    # 테스트용: 2026-07-05 UTC 07:56 (한국 시간 일요일 16:56)
     # 테스트 후 주간 스케줄로 되돌리세요.
     # https://elmah.io/tools/cron-parser/
-    - cron: '18 5 * * 0'
+    - cron: '56 7 * * 0'
   workflow_dispatch: # Allow manual trigger
 
 permissions:
