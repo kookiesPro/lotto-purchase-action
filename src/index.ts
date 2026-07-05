@@ -29,47 +29,48 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function reportPurchaseFailure(error: unknown, message: string): Promise<void> {
+async function reportPurchaseFailure(error: unknown, message: string, label = '복권 구매'): Promise<void> {
   const details = isInsufficientBalanceError(error) ? error.details : undefined;
 
   try {
-    await createPurchaseFailureIssue(details, message);
+    await createPurchaseFailureIssue(details, message, label);
   } catch (issueError) {
     console.error('[Main] Failed to create purchase failure issue:', issueError);
   }
 
   try {
-    await notifyPurchaseFailure(details, message);
+    await notifyPurchaseFailure(details, message, label);
   } catch (telegramError) {
     console.error('[Main] Failed to notify purchase failure via Telegram:', telegramError);
   }
 }
 
-async function executePurchaseStep<T>(
+function recordPurchaseStepFailure(label: string, error: unknown, failures: PurchaseStepFailure[]): void {
+  const message = getErrorMessage(error);
+  failures.push({ label, error, message });
+  console.warn(`[Main] ${label} failed: ${message}`);
+}
+
+async function trackPurchaseStep<T>(
   label: string,
   task: () => Promise<T>,
   failures: PurchaseStepFailure[]
-): Promise<T | undefined> {
+): Promise<T> {
   try {
     return await task();
   } catch (error) {
-    const message = getErrorMessage(error);
-    failures.push({ label, error, message });
-    console.warn(`[Main] ${label} failed, continuing with next purchase step: ${message}`);
-    return undefined;
+    recordPurchaseStepFailure(label, error, failures);
+    throw error;
   }
 }
 
-function throwPurchaseStepFailures(failures: PurchaseStepFailure[]): void {
-  if (failures.length === 0) {
-    return;
+async function attemptPurchaseStep<T>(label: string, task: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await task();
+  } catch (error) {
+    console.warn(`[Main] ${label} failed, continuing with next purchase step: ${getErrorMessage(error)}`);
+    return undefined;
   }
-
-  if (failures.length === 1) {
-    throw failures[0]!.error;
-  }
-
-  throw new Error(failures.map(failure => `${failure.label}: ${failure.message}`).join('\n'));
 }
 
 async function attachRemainingBalance(session: BrowserSession, purchases: PurchaseMetadata[]): Promise<void> {
@@ -124,6 +125,7 @@ async function loadWorkflow(workflowFile: string): Promise<CustomWorkflow> {
 async function run() {
   const session = new BrowserSession();
   const purchases: PurchaseMetadata[] = []; // Track all successful purchases
+  const purchaseFailures: PurchaseStepFailure[] = [];
   let purchaseWorkflowStarted = false;
 
   try {
@@ -161,38 +163,56 @@ async function run() {
     // Create API with session bound to functions (no need to pass session manually)
     const api: WorkflowApi = {
       purchaseAuto: async (amt: number) => {
-        console.log(`[Main] Executing auto purchase: ${amt} games`);
-        const result = await purchaseAuto(session, amt);
-        purchases.push({
-          product: 'lotto645',
-          type: 'auto',
-          numbers: result,
-          timestamp: new Date().toISOString()
-        }); // Auto-track successful purchase
-        console.log(`[Main] Auto purchase successful: ${result.length} games`);
-        return result;
+        return trackPurchaseStep(
+          `로또645 자동 구매 ${amt}게임`,
+          async () => {
+            console.log(`[Main] Executing auto purchase: ${amt} games`);
+            const result = await purchaseAuto(session, amt);
+            purchases.push({
+              product: 'lotto645',
+              type: 'auto',
+              numbers: result,
+              timestamp: new Date().toISOString()
+            }); // Auto-track successful purchase
+            console.log(`[Main] Auto purchase successful: ${result.length} games`);
+            return result;
+          },
+          purchaseFailures
+        );
       },
       purchaseManual: async (numbers: number[][]) => {
-        console.log(`[Main] Executing manual purchase: ${numbers.length} games`);
-        const result = await purchaseManual(session, numbers);
-        purchases.push({
-          product: 'lotto645',
-          type: 'manual',
-          numbers: result,
-          timestamp: new Date().toISOString()
-        }); // Auto-track successful purchase
-        console.log(`[Main] Manual purchase successful: ${result.length} games`);
-        return result;
+        return trackPurchaseStep(
+          `로또645 수동 구매 ${numbers.length}게임`,
+          async () => {
+            console.log(`[Main] Executing manual purchase: ${numbers.length} games`);
+            const result = await purchaseManual(session, numbers);
+            purchases.push({
+              product: 'lotto645',
+              type: 'manual',
+              numbers: result,
+              timestamp: new Date().toISOString()
+            }); // Auto-track successful purchase
+            console.log(`[Main] Manual purchase successful: ${result.length} games`);
+            return result;
+          },
+          purchaseFailures
+        );
       },
       purchasePension720: async (amt?: number) => {
-        console.log(`[Main] Executing pension720 purchase: ${amt ?? 5000} KRW`);
-        const result = await purchasePension720(session, amt);
-        purchases.push({
-          ...result,
-          timestamp: new Date().toISOString()
-        });
-        console.log(`[Main] Pension720 purchase successful: ${result.ticketCount} tickets`);
-        return result;
+        return trackPurchaseStep(
+          `연금복권720+ 구매`,
+          async () => {
+            console.log(`[Main] Executing pension720 purchase: ${amt ?? 5000} KRW`);
+            const result = await purchasePension720(session, amt);
+            purchases.push({
+              ...result,
+              timestamp: new Date().toISOString()
+            });
+            console.log(`[Main] Pension720 purchase successful: ${result.ticketCount} tickets`);
+            return result;
+          },
+          purchaseFailures
+        );
       },
       generateExcluding: (exclude: number[][], count: number) => {
         console.log(`[Main] Generating ${count} games excluding ${exclude.length} sets`);
@@ -211,10 +231,8 @@ async function run() {
       // Default: lotto auto purchase plus pension720 all-groups auto purchase.
       console.log(`[Main] Running default auto purchase: ${amount} games`);
       purchaseWorkflowStarted = true;
-      const purchaseStepFailures: PurchaseStepFailure[] = [];
-      await executePurchaseStep(`로또 자동 구매 ${amount}게임`, () => api.purchaseAuto(amount), purchaseStepFailures);
-      await executePurchaseStep('연금복권720+ 구매', () => api.purchasePension720(), purchaseStepFailures);
-      throwPurchaseStepFailures(purchaseStepFailures);
+      await attemptPurchaseStep(`로또 자동 구매 ${amount}게임`, () => api.purchaseAuto(amount));
+      await attemptPurchaseStep('연금복권720+ 구매', () => api.purchasePension720());
     }
 
     console.log(`[Main] All purchases completed: ${purchases.length} total purchases`);
@@ -224,12 +242,20 @@ async function run() {
 
     if (purchaseWorkflowStarted) {
       core.warning(`복권 구매 실패: ${message}`);
-      await reportPurchaseFailure(error, message);
+      if (purchaseFailures.length === 0) {
+        await reportPurchaseFailure(error, message);
+      } else {
+        console.log(`[Main] Purchase step failures will be reported individually: ${purchaseFailures.length}`);
+      }
     } else {
       core.setFailed(message);
     }
     // Continue to create issues for successful purchases
   } finally {
+    for (const failure of purchaseFailures) {
+      await reportPurchaseFailure(failure.error, failure.message, failure.label);
+    }
+
     // Create one consolidated issue for all successful purchases
     if (purchases.length > 0) {
       try {

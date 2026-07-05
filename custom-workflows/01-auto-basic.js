@@ -31,11 +31,7 @@ export default async ({ purchaseAuto, purchasePension720 }) => {
     console.warn(`연금복권720+ 구매 실패: ${message}`);
   }
 
-  if (failures.length === 1) {
-    throw failures[0].error;
-  }
-
-  if (failures.length > 1) {
-    throw new Error(failures.map(failure => `${failure.name}: ${failure.message}`).join('\n'));
+  if (failures.length > 0) {
+    console.warn(`구매 단계 ${failures.length}개가 실패했습니다. 실패 알림은 각 구매 단계별로 별도 발송됩니다.`);
   }
 };

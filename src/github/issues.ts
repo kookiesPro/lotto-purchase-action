@@ -91,7 +91,8 @@ export async function createConsolidatedIssue(purchases: PurchaseMetadata[]): Pr
 // Create a GitHub Issue for a purchase failure that needs user action
 export async function createPurchaseFailureIssue(
   details: InsufficientBalanceDetails | undefined,
-  message: string
+  message: string,
+  label = '복권 구매'
 ): Promise<void> {
   const octokit = getOctokit();
   const repo = getRepo();
@@ -102,7 +103,7 @@ export async function createPurchaseFailureIssue(
 
   await octokit.rest.issues.create({
     ...repo,
-    title: `복권 구매 실패 - ${reason} (${new Date().toISOString().slice(0, 10)})`,
+    title: `${label} 실패 - ${reason} (${new Date().toISOString().slice(0, 10)})`,
     body: buildPurchaseFailureIssueBody(details, message, workflowRun),
     labels: [LABELS.purchase_failure]
   });
