@@ -1,9 +1,10 @@
 name: 로또/연금복권 구매 (수동 + 스케줄)
 on:
   schedule:
-    # 매주 일요일 UTC 03:00 (한국 시간 일요일 12:00)
+    # 매주 일요일 UTC 03:17 (한국 시간 일요일 12:17)
+    # GitHub Actions schedule은 매시 정각에 지연/누락될 수 있어 17분으로 분산합니다.
     # https://elmah.io/tools/cron-parser/
-    - cron: '0 3 * * 0'
+    - cron: '17 3 * * 0'
   workflow_dispatch: # Allow manual trigger
 
 permissions:
