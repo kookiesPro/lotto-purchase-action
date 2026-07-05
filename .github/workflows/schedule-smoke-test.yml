@@ -1,0 +1,20 @@
+name: 스케줄 동작 확인 (구매 없음)
+
+on:
+  schedule:
+    # 테스트용: GitHub schedule 이벤트가 저장소에서 도는지 확인합니다. 실제 구매는 하지 않습니다.
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print schedule probe time
+        run: |
+          echo "Schedule smoke test only. No purchase will be made."
+          echo "UTC: $(date -u '+%Y-%m-%d %H:%M:%S')"
+          echo "KST: $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S')"
