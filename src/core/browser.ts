@@ -7,6 +7,8 @@ import {
   BROWSER_PAGE_POPUP_WAIT,
   LOGIN_ERROR_MESSAGE,
   LOGIN_SUCCESS_TEXT,
+  PASSWORD_CHANGE_DEFER_TEXT,
+  PASSWORD_CHANGE_NOTICE_TEXT,
   GOTO_TIMEOUT,
   type BrowserConfig
 } from './config';
@@ -74,6 +76,15 @@ export class BrowserSession {
 
     console.log('[Browser] Waiting for login result');
     await this.waitForLoginResult();
+
+    if (await this.deferPasswordChangeNotice()) {
+      console.log('[Browser] Login successful after deferring password change notice');
+      this.authenticated = true;
+
+      await this.page.waitForTimeout(BROWSER_PAGE_POPUP_WAIT);
+      await this.closeOtherPages();
+      return;
+    }
 
     // Check success
     if (await this.isLoginSuccessful()) {
@@ -191,6 +202,9 @@ export class BrowserSession {
         this.page.waitForURL(url => url.toString().includes(URLS.MAIN), {
           timeout: BROWSER_LOGIN_TIMEOUT
         }),
+        this.page.waitForURL(url => url.toString().includes(URLS.PASSWORD_CHANGE_NOTICE), {
+          timeout: BROWSER_LOGIN_TIMEOUT
+        }),
         successIndicator.waitFor({
           state: 'visible',
           timeout: BROWSER_LOGIN_TIMEOUT
@@ -214,6 +228,43 @@ export class BrowserSession {
 
     const logoutCount = await this.page.getByText(LOGIN_SUCCESS_TEXT, { exact: true }).count();
     return logoutCount > 0;
+  }
+
+  private async deferPasswordChangeNotice(): Promise<boolean> {
+    if (!this.page) return false;
+
+    const isNoticeUrl = this.page.url().includes(URLS.PASSWORD_CHANGE_NOTICE);
+    const hasNoticeText = (await this.page.getByText(PASSWORD_CHANGE_NOTICE_TEXT).count().catch(() => 0)) > 0;
+    if (!isNoticeUrl && !hasNoticeText) {
+      return false;
+    }
+
+    console.log('[Browser] Password change notice detected; selecting next-time option');
+
+    let clicked = false;
+    const deferTextButton = this.page.getByText(PASSWORD_CHANGE_DEFER_TEXT).first();
+    if ((await deferTextButton.count().catch(() => 0)) > 0) {
+      await deferTextButton.click();
+      clicked = true;
+    } else {
+      const deferValueInput = this.page.locator(`input[value*="${PASSWORD_CHANGE_DEFER_TEXT}"]`).first();
+      if ((await deferValueInput.count().catch(() => 0)) > 0) {
+        await deferValueInput.click();
+        clicked = true;
+      }
+    }
+
+    if (!clicked) {
+      console.warn('[Browser] Password change defer option was not found');
+      return false;
+    }
+
+    await this.page
+      .waitForURL(url => url.toString().includes(URLS.MAIN), { timeout: BROWSER_LOGIN_TIMEOUT })
+      .catch(() => undefined);
+    await this.page.waitForTimeout(BROWSER_LOGIN_WAIT);
+
+    return this.isLoginSuccessful();
   }
 
   private async getLoginDiagnostics(): Promise<string> {

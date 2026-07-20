@@ -3,6 +3,7 @@ export const URLS = {
   MAIN: 'https://www.dhlottery.co.kr/main',
   LOGIN: 'https://www.dhlottery.co.kr/login',
   LOGOUT: 'https://www.dhlottery.co.kr/logout.do',
+  PASSWORD_CHANGE_NOTICE: 'https://www.dhlottery.co.kr/mbrsrvc/ExpryPswdNoti',
   MYPAGE_HOME: 'https://www.dhlottery.co.kr/mypage/home',
   LOTTO_645: 'https://ol.dhlottery.co.kr/olotto/game/game645.do',
   PENSION_720_MOBILE: 'https://el.dhlottery.co.kr/game_mobile/pension720/game.jsp',
@@ -42,6 +43,8 @@ export const WEEK_TO_MILLISECOND = 604800000;
 export const THOUSAND_ROUND_DATE = '2022-01-29T11:50:00Z';
 export const LOGIN_ERROR_MESSAGE = '아이디 또는 비밀번호가 일치하지 않습니다';
 export const LOGIN_SUCCESS_TEXT = '로그아웃';
+export const PASSWORD_CHANGE_NOTICE_TEXT = '비밀번호 변경안내';
+export const PASSWORD_CHANGE_DEFER_TEXT = '다음에 변경';
 export const GOTO_TIMEOUT = 60000;
 export const PURCHASE_PAGE_READY_TIMEOUT = 15000;
 export const PURCHASE_RESULT_TIMEOUT = 10000;

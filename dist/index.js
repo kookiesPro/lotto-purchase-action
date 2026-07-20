@@ -30828,6 +30828,7 @@ const URLS = {
     MAIN: 'https://www.dhlottery.co.kr/main',
     LOGIN: 'https://www.dhlottery.co.kr/login',
     LOGOUT: 'https://www.dhlottery.co.kr/logout.do',
+    PASSWORD_CHANGE_NOTICE: 'https://www.dhlottery.co.kr/mbrsrvc/ExpryPswdNoti',
     MYPAGE_HOME: 'https://www.dhlottery.co.kr/mypage/home',
     LOTTO_645: 'https://ol.dhlottery.co.kr/olotto/game/game645.do',
     PENSION_720_MOBILE: 'https://el.dhlottery.co.kr/game_mobile/pension720/game.jsp',
@@ -30862,6 +30863,8 @@ const WEEK_TO_MILLISECOND = 604800000;
 const THOUSAND_ROUND_DATE = '2022-01-29T11:50:00Z';
 const LOGIN_ERROR_MESSAGE = '아이디 또는 비밀번호가 일치하지 않습니다';
 const LOGIN_SUCCESS_TEXT = '로그아웃';
+const PASSWORD_CHANGE_NOTICE_TEXT = '비밀번호 변경안내';
+const PASSWORD_CHANGE_DEFER_TEXT = '다음에 변경';
 const GOTO_TIMEOUT = 60000;
 const PURCHASE_PAGE_READY_TIMEOUT = 15000;
 const PURCHASE_RESULT_TIMEOUT = 10000;
@@ -30923,6 +30926,13 @@ class BrowserSession {
             yield rsaResponsePromise;
             console.log('[Browser] Waiting for login result');
             yield this.waitForLoginResult();
+            if (yield this.deferPasswordChangeNotice()) {
+                console.log('[Browser] Login successful after deferring password change notice');
+                this.authenticated = true;
+                yield this.page.waitForTimeout(BROWSER_PAGE_POPUP_WAIT);
+                yield this.closeOtherPages();
+                return;
+            }
             // Check success
             if (yield this.isLoginSuccessful()) {
                 console.log('[Browser] Login successful');
@@ -31034,6 +31044,9 @@ class BrowserSession {
                     this.page.waitForURL(url => url.toString().includes(URLS.MAIN), {
                         timeout: BROWSER_LOGIN_TIMEOUT
                     }),
+                    this.page.waitForURL(url => url.toString().includes(URLS.PASSWORD_CHANGE_NOTICE), {
+                        timeout: BROWSER_LOGIN_TIMEOUT
+                    }),
                     successIndicator.waitFor({
                         state: 'visible',
                         timeout: BROWSER_LOGIN_TIMEOUT
@@ -31058,6 +31071,40 @@ class BrowserSession {
             }
             const logoutCount = yield this.page.getByText(LOGIN_SUCCESS_TEXT, { exact: true }).count();
             return logoutCount > 0;
+        });
+    }
+    deferPasswordChangeNotice() {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            if (!this.page)
+                return false;
+            const isNoticeUrl = this.page.url().includes(URLS.PASSWORD_CHANGE_NOTICE);
+            const hasNoticeText = (yield this.page.getByText(PASSWORD_CHANGE_NOTICE_TEXT).count().catch(() => 0)) > 0;
+            if (!isNoticeUrl && !hasNoticeText) {
+                return false;
+            }
+            console.log('[Browser] Password change notice detected; selecting next-time option');
+            let clicked = false;
+            const deferTextButton = this.page.getByText(PASSWORD_CHANGE_DEFER_TEXT).first();
+            if ((yield deferTextButton.count().catch(() => 0)) > 0) {
+                yield deferTextButton.click();
+                clicked = true;
+            }
+            else {
+                const deferValueInput = this.page.locator(`input[value*="${PASSWORD_CHANGE_DEFER_TEXT}"]`).first();
+                if ((yield deferValueInput.count().catch(() => 0)) > 0) {
+                    yield deferValueInput.click();
+                    clicked = true;
+                }
+            }
+            if (!clicked) {
+                console.warn('[Browser] Password change defer option was not found');
+                return false;
+            }
+            yield this.page
+                .waitForURL(url => url.toString().includes(URLS.MAIN), { timeout: BROWSER_LOGIN_TIMEOUT })
+                .catch(() => undefined);
+            yield this.page.waitForTimeout(BROWSER_LOGIN_WAIT);
+            return this.isLoginSuccessful();
         });
     }
     getLoginDiagnostics() {
