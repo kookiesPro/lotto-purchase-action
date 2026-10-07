@@ -1,8 +1,6 @@
-name: 로또/연금복권 구매
+name: 로또/연금복권 구매 (수동 실행)
 on:
   workflow_dispatch: # Allow manual trigger
-  schedule:
-    - cron: '0 1 * * 1' # 매주 월요일 10:00 KST (= 01:00 UTC)
 
 permissions:
   contents: read
