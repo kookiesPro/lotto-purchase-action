@@ -25,6 +25,10 @@ interface PurchaseStepFailure {
   message: string;
 }
 
+function isGithubEnabled(): boolean {
+  return Boolean(core.getInput('github-token') || process.env.GITHUB_TOKEN);
+}
+
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -32,10 +36,12 @@ function getErrorMessage(error: unknown): string {
 async function reportPurchaseFailure(error: unknown, message: string, label = '복권 구매'): Promise<void> {
   const details = isInsufficientBalanceError(error) ? error.details : undefined;
 
-  try {
-    await createPurchaseFailureIssue(details, message, label);
-  } catch (issueError) {
-    console.error('[Main] Failed to create purchase failure issue:', issueError);
+  if (isGithubEnabled()) {
+    try {
+      await createPurchaseFailureIssue(details, message, label);
+    } catch (issueError) {
+      console.error('[Main] Failed to create purchase failure issue:', issueError);
+    }
   }
 
   try {
@@ -147,17 +153,21 @@ async function run() {
     console.log('[Main] Logging in');
     await session.login(id, pwd);
 
-    // Initialize GitHub labels
-    console.log('[Main] Initializing GitHub labels');
-    await initLabels();
+    if (isGithubEnabled()) {
+      // Initialize GitHub labels
+      console.log('[Main] Initializing GitHub labels');
+      await initLabels();
 
-    // Check previous purchases for winning
-    console.log('[Main] Checking winning for previous purchases');
-    const winningResults = await checkWinningIssues();
+      // Check previous purchases for winning
+      console.log('[Main] Checking winning for previous purchases');
+      const winningResults = await checkWinningIssues();
 
-    // Send Telegram notifications for winning results
-    for (const result of winningResults) {
-      await notifyWinning(result.issueNumber, result.round, result.ranks);
+      // Send Telegram notifications for winning results
+      for (const result of winningResults) {
+        await notifyWinning(result.issueNumber, result.round, result.ranks);
+      }
+    } else {
+      console.log('[Main] GitHub token not set: skipping GitHub issue tracking (local mode)');
     }
 
     // Create API with session bound to functions (no need to pass session manually)
@@ -260,7 +270,9 @@ async function run() {
     if (purchases.length > 0) {
       try {
         await attachRemainingBalance(session, purchases);
-        await createConsolidatedIssue(purchases);
+        if (isGithubEnabled()) {
+          await createConsolidatedIssue(purchases);
+        }
         const totalLottoGames = purchases.reduce(
           (sum, p) => sum + (p.product === 'lotto645' ? p.numbers.length : 0),
           0

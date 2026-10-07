@@ -30,3 +30,7 @@ pnpm-debug.log*
 /playwright-report/
 /test-results/
 *.tgz
+
+# Local runner
+/local/logs/
+/local/last-run.txt

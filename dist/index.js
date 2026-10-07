@@ -57999,17 +57999,22 @@ function notifyPurchaseFailure(details, message, label = '복권 구매') {
     });
 }
 
+function isGithubEnabled() {
+    return Boolean(coreExports.getInput('github-token') || process.env.GITHUB_TOKEN);
+}
 function getErrorMessage(error) {
     return error instanceof Error ? error.message : String(error);
 }
 function reportPurchaseFailure(error, message, label = '복권 구매') {
     return __awaiter$3(this, void 0, void 0, function* () {
         const details = isInsufficientBalanceError(error) ? error.details : undefined;
-        try {
-            yield createPurchaseFailureIssue(details, message, label);
-        }
-        catch (issueError) {
-            console.error('[Main] Failed to create purchase failure issue:', issueError);
+        if (isGithubEnabled()) {
+            try {
+                yield createPurchaseFailureIssue(details, message, label);
+            }
+            catch (issueError) {
+                console.error('[Main] Failed to create purchase failure issue:', issueError);
+            }
         }
         try {
             yield notifyPurchaseFailure(details, message, label);
@@ -58111,15 +58116,20 @@ function run() {
             });
             console.log('[Main] Logging in');
             yield session.login(id, pwd);
-            // Initialize GitHub labels
-            console.log('[Main] Initializing GitHub labels');
-            yield initLabels();
-            // Check previous purchases for winning
-            console.log('[Main] Checking winning for previous purchases');
-            const winningResults = yield checkWinningIssues();
-            // Send Telegram notifications for winning results
-            for (const result of winningResults) {
-                yield notifyWinning(result.issueNumber, result.round, result.ranks);
+            if (isGithubEnabled()) {
+                // Initialize GitHub labels
+                console.log('[Main] Initializing GitHub labels');
+                yield initLabels();
+                // Check previous purchases for winning
+                console.log('[Main] Checking winning for previous purchases');
+                const winningResults = yield checkWinningIssues();
+                // Send Telegram notifications for winning results
+                for (const result of winningResults) {
+                    yield notifyWinning(result.issueNumber, result.round, result.ranks);
+                }
+            }
+            else {
+                console.log('[Main] GitHub token not set: skipping GitHub issue tracking (local mode)');
             }
             // Create API with session bound to functions (no need to pass session manually)
             const api = {
@@ -58207,7 +58217,9 @@ function run() {
             if (purchases.length > 0) {
                 try {
                     yield attachRemainingBalance(session, purchases);
-                    yield createConsolidatedIssue(purchases);
+                    if (isGithubEnabled()) {
+                        yield createConsolidatedIssue(purchases);
+                    }
                     const totalLottoGames = purchases.reduce((sum, p) => sum + (p.product === 'lotto645' ? p.numbers.length : 0), 0);
                     const totalPensionTickets = purchases.reduce((sum, p) => sum + (p.product === 'pension720' ? p.ticketCount : 0), 0);
                     console.log(`[Main] Processed ${purchases.length} purchases (${totalLottoGames} lotto games, ${totalPensionTickets} pension720 tickets)`);
